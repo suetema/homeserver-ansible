@@ -1,6 +1,17 @@
-docker_packages:
+docker_deps_packages:
   - apt-transport-https
   - ca-certificates
   - curl
   - gnupg
   - lsb-release
+  - python3-pip
+  - python3-setuptools
+
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+
+docker_gpg_url: https://download.docker.com/linux/ubuntu/gpg
+docker_repo: deb https://download.docker.com/linux/ubuntu focal stable
+docker_compose_url: https://github.com/docker/compose/releases/download/1.28.2/docker-compose-Linux-x86_64
