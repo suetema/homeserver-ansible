@@ -1,0 +1,7 @@
+---
+
+- name: Install ntp
+  include_tasks: "ntp.yaml"
+
+- name: Install powertop
+  include_tasks: powertop.yaml

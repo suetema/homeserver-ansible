@@ -1,0 +1,5 @@
+---
+powertop_packages:
+  - powertop
+    
+powertop_service: powertop

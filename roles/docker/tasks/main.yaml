@@ -1,0 +1,6 @@
+---
+
+- name: Install Docker dependencies.
+  ansible.builtin.package:
+    name: "{{ docker_packages }}"
+    state: present

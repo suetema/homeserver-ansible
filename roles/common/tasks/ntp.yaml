@@ -1,0 +1,21 @@
+---
+# This playbook contains common plays that will be run on all nodes.
+- name: Install ntp
+  ansible.builtin.package:
+    name: ntp
+    state: present
+  tags: ntp
+
+- name: Configure ntp file
+  template:
+    src: ntp.conf.j2
+    dest: /etc/ntp.conf
+  tags: ntp
+  notify: restart ntp
+
+- name: Start the ntp service
+  ansible.builtin.service:
+    name: ntp
+    state: started
+    enabled: yes
+  tags: ntp
