@@ -1,0 +1,4 @@
+nfs_packages:
+  - nfs-common
+nfsShare: SYNOLOGY
+nfsOpts: "rw,sync,nfsvers=3"

@@ -1,7 +1,10 @@
 - name: apply common configuration to all nodes
   hosts: all
   remote_user: maarten
+  become: yes
 
   roles:
-    - { role: common, become: yes }
-    - { role: docker, become: yes }
+    - common
+    - docker
+    - nfs-client
+    - compose

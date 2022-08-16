@@ -1,0 +1,5 @@
+---
+- name: Disable DNS Stub Listener(free port 53 without disabling dns resolv)
+  ansible.builtin.command:
+    cmd: sed -r -i.orig 's/#?DNSStubListener=yes/DNSStubListener=no/g' /etc/systemd/resolved.conf
+  notify: restart resolved

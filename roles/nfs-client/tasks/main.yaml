@@ -1,0 +1,20 @@
+---
+- name: Create NFS client group.
+  ansible.builtin.group:
+    name: synnfs
+    state: present
+    gid: 1099
+
+- name: Create NFS client user.
+  ansible.builtin.user:
+    name: synnfs
+    comment: NFS client user
+    uid: 1099
+    group: synnfs
+
+- name: Install NFS dependencies.
+  ansible.builtin.package:
+    name: "{{ nfs_packages }}"
+    state: present
+
+

@@ -5,3 +5,6 @@
 
 - name: Install powertop
   include_tasks: powertop.yaml
+
+- name: Configure DNS
+  include_tasks: dns.yaml
