@@ -35,3 +35,9 @@
     url: "{{ docker_compose_url }}"
     dest: /usr/local/bin/docker-compose
     mode: u+x,g+x,o+x
+
+- name: adding existing user '{{ user }}' to group sudo
+  user:
+    name: '{{ ansible_user }}'
+    groups: docker
+    append: yes

@@ -1,0 +1,6 @@
+---
+# This playbook contains common plays that will be run on all nodes.
+- name: Install base packages.
+  ansible.builtin.package:
+    name: "{{ base_packages }}"
+    state: present

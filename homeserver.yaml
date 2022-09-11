@@ -6,5 +6,5 @@
   roles:
     - common
     - docker
-    - nfs-client
-    - compose
+    - role: compose
+      become: yes    

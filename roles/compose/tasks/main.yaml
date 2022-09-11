@@ -1,0 +1,25 @@
+---
+- name: Install docker-compose python package
+  ansible.builtin.pip:
+    name: docker-compose
+
+- name: create the compose directory
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/compose"
+    state: directory
+    mode: '0755'
+
+- name: copy all files
+  copy:
+    src: "{{ item }}"
+    dest: "/home/{{ ansible_user }}/compose"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0644'  
+  with_fileglob: "files/*"
+
+  # use files parameter to use multiple docker-compose.yml files
+- name: deploy Docker Compose stack
+  community.docker.docker_compose:
+    project_src: "/home/{{ ansible_user }}/compose"
+    remove_orphans: true
