@@ -1,0 +1,84 @@
+---
+- name: Install reviewed empty-host k3s prerequisites without reviving Docker or Compose
+  ansible.builtin.apt:
+    name: [ca-certificates, iptables, conntrack, socat]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Stage the pinned bootstrap artifact
+  ansible.builtin.include_tasks: artifact.yaml
+
+- name: Create private bootstrap configuration directory
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install an empty protected environment only on the explicitly empty host
+  ansible.builtin.copy:
+    content: ""
+    dest: /etc/systemd/system/k3s.service.env
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+  no_log: true
+
+- name: Install reproducible reviewed service flags without a floating installer
+  ansible.builtin.template:
+    src: k3s.service.j2
+    dest: /etc/systemd/system/k3s.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install boot-time reviewed writable mount UUID guard
+  ansible.builtin.template:
+    src: k3s-mountcheck.py.j2
+    dest: /usr/local/lib/k3s-mountcheck.py
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Mark only this empty bootstrap as Ansible prepared
+  ansible.builtin.copy:
+    content: "Host installation prepared by roles/k3s; application restoration is separate.\n"
+    dest: /etc/rancher/k3s/.ansible-bootstrap
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Atomically install the exact bootstrap executable
+  ansible.builtin.copy:
+    src: /usr/local/bin/k3s.ansible-staged
+    remote_src: true
+    dest: /usr/local/bin/k3s
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Reload the service but default to stopped for restoration of existing state
+  ansible.builtin.systemd_service:
+    name: k3s
+    daemon_reload: true
+    enabled: "{{ k3s_start_bootstrap | bool }}"
+    state: "{{ 'started' if k3s_start_bootstrap | bool else 'stopped' }}"
+    no_block: true
+  async: 20
+  poll: 1
+
+- name: Bound readiness only when empty-host startup was explicitly selected
+  ansible.builtin.include_tasks: service-ready.yaml
+  vars:
+    k3s_expected_running_version: "{{ k3s_target_version }}"
+  when: k3s_start_bootstrap | bool
+
+- name: Explain state reconstruction boundary
+  ansible.builtin.debug:
+    msg: >-
+      Pinned host installation only. Default stopped: restore matching datastore/token,
+      TLS/config, PVC files and Secrets separately before permitting Flux/app startup.
+      Fresh cluster creation does not recover application state.

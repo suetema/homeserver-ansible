@@ -1,0 +1,28 @@
+---
+- name: Require active k3s service and a nonzero server PID within a bounded deadline
+  ansible.builtin.command:
+    argv: [systemctl, show, k3s, '-p', ActiveState, '-p', MainPID]
+  changed_when: false
+  register: k3s_started_service
+  async: 10
+  poll: 1
+  until: "k3s_started_service.rc == 0 and 'ActiveState=active' in k3s_started_service.stdout and 'MainPID=0' not in k3s_started_service.stdout"
+  retries: 10
+  delay: 2
+
+- name: Require the sole node Ready on the expected current binary version
+  ansible.builtin.command:
+    argv: [/usr/local/bin/k3s, kubectl, --request-timeout=10s, get, nodes, '-o', json]
+  changed_when: false
+  register: k3s_started_node
+  async: 15
+  poll: 1
+  until:
+    - k3s_started_node.rc == 0
+    - (k3s_started_node.stdout | from_json)['items'] | length == 1
+    - (k3s_started_node.stdout | from_json)['items'][0].status.nodeInfo.kubeletVersion == k3s_expected_running_version
+    - >-
+      (k3s_started_node.stdout | from_json)['items'][0].status.conditions |
+      selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length == 1
+  retries: 30
+  delay: 5

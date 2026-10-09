@@ -1,0 +1,7 @@
+---
+preflight_media_path: /mnt/volume1
+preflight_minimum_root_free_bytes: 16106127360
+preflight_supported_ubuntu_releases:
+  - "20.04"
+  - "22.04"
+  - "24.04"

@@ -1,0 +1,51 @@
+---
+- name: Install the temporary unchanged-binary safeguard helper through Ansible
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/scripts/k3s_checkpoint_guard.py"
+    dest: /var/backups/homelab-upgrade/k3s-checkpoint-guard.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the reviewed temporary safeguard service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: [k3s-checkpoint-guard.service, k3s-checkpoint-guard.timer]
+
+- name: Arm this checkpoint safeguard with exact original binary and unit identities
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /var/backups/homelab-upgrade/k3s-checkpoint-guard.py
+      - arm
+      - "{{ k3s_run_id }}"
+      - "{{ k3s_baseline.sha256 }}"
+      - "{{ k3s_baseline.unit_sha256 }}"
+  changed_when: true
+  async: 20
+  poll: 1
+
+- name: Start the independent host-local timer before any intentional service pause
+  ansible.builtin.systemd_service:
+    name: k3s-checkpoint-guard.timer
+    daemon_reload: true
+    state: started
+    enabled: false
+    no_block: true
+  async: 20
+  poll: 1
+
+- name: Require the independent local timer to be armed before stopping k3s
+  ansible.builtin.command:
+    argv: [systemctl, is-active, k3s-checkpoint-guard.timer]
+  register: k3s_guard_timer_ready
+  changed_when: false
+  async: 10
+  poll: 1
+  until: k3s_guard_timer_ready.rc == 0 and k3s_guard_timer_ready.stdout | trim == 'active'
+  retries: 5
+  delay: 1

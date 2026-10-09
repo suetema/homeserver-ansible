@@ -1,0 +1,145 @@
+---
+- name: Stage exact artifact before any pause
+  ansible.builtin.include_tasks: artifact.yaml
+
+- name: Ensure the private maintenance evidence directory
+  ansible.builtin.file:
+    path: /var/backups/homelab-upgrade
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the reviewed Ansible-only checkpoint helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/scripts/k3s_checkpoint_remote.py"
+    dest: /var/backups/homelab-upgrade/k3s-checkpoint.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the credential-safe functional acceptance helpers
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/scripts/{{ item }}"
+    dest: "/var/backups/homelab-upgrade/{{ item }}"
+    owner: root
+    group: root
+    mode: "0700"
+  loop: [k3s_guard.py, k3s_validate_remote.py, arr_private_access_probe.py]
+
+- name: Capture fresh functional baseline before any automation pause
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /var/backups/homelab-upgrade/k3s_validate_remote.py
+      - baseline
+      - /var/backups/homelab-upgrade/k3s-baseline.json
+      - "{{ k3s_target_sha256 }}"
+  changed_when: true
+
+- name: Perform one-hop transaction and always restore original Flux suspension states
+  block:
+    - name: Pause only originally unsuspended reconciliation using sanctioned Flux commands
+      ansible.builtin.command:
+        argv: >-
+          {{ [k3s_baseline.flux_cli, '--kubeconfig=/etc/rancher/k3s/k3s.yaml', '--timeout=60s', 'suspend'] +
+             ({'Kustomization': ['kustomization'], 'HelmRelease': ['helmrelease'],
+               'ImageUpdateAutomation': ['image', 'update']}[item.kind]) +
+             [item.name, '--namespace', item.namespace] }}
+      loop: >-
+        {{ (k3s_baseline.flux | selectattr('kind', 'equalto', 'Kustomization') | list) +
+           (k3s_baseline.flux | selectattr('kind', 'equalto', 'HelmRelease') | list) +
+           k3s_baseline.automation }}
+      loop_control:
+        label: "{{ item.kind }}/{{ item.namespace }}/{{ item.name }}"
+      when: not item.suspended
+      changed_when: true
+
+    - name: Create and verify independent recovery unit for this hop
+      ansible.builtin.include_tasks: checkpoint.yaml
+
+    - name: Record the verified checkpoint and impending binary transaction
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /var/backups/homelab-upgrade/k3s-checkpoint.py, status, k3s-replacing-binary, "{{ k3s_target_version }}"]
+      changed_when: true
+
+    - name: Atomically replace only the executable after verified recovery gate
+      ansible.builtin.include_tasks: guard-disarm.yaml
+
+    - name: Promote the verified pinned executable only after safeguard cancellation
+      ansible.builtin.copy:
+        src: /usr/local/bin/k3s.ansible-staged
+        remote_src: true
+        dest: /usr/local/bin/k3s
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart pinned k3s once after an accepted binary replacement
+
+    - name: Restart only once for this pinned hop
+      ansible.builtin.meta: flush_handlers
+
+    - name: Require existing SSH to remain reachable without changing its socket/service
+      ansible.builtin.wait_for_connection:
+        timeout: 180
+        connect_timeout: 10
+
+    - name: Require new API readiness before restoring reconciliation
+      ansible.builtin.command:
+        argv: [/usr/local/bin/k3s, kubectl, --request-timeout=10s, get, --raw=/readyz]
+      changed_when: false
+      register: k3s_upgraded_readyz
+      async: 15
+      poll: 1
+      until: k3s_upgraded_readyz.rc == 0 and k3s_upgraded_readyz.stdout | trim == 'ok'
+      retries: 30
+      delay: 10
+
+    - name: Require bounded service PID and node health after the binary promotion
+      ansible.builtin.include_tasks: service-ready.yaml
+      vars:
+        k3s_expected_running_version: "{{ k3s_target_version }}"
+  always:
+    - name: Restore only originally unsuspended Flux resources without changing app specs
+      ansible.builtin.command:
+        argv: >-
+          {{ [k3s_baseline.flux_cli, '--kubeconfig=/etc/rancher/k3s/k3s.yaml', '--timeout=60s', 'resume'] +
+             ({'Kustomization': ['kustomization'], 'HelmRelease': ['helmrelease'],
+               'ImageUpdateAutomation': ['image', 'update']}[item.kind]) +
+             [item.name, '--namespace', item.namespace] }}
+      loop: >-
+        {{ (k3s_baseline.flux | selectattr('kind', 'equalto', 'HelmRelease') | list) +
+           (k3s_baseline.flux | selectattr('kind', 'equalto', 'Kustomization') | list) +
+           k3s_baseline.automation }}
+      loop_control:
+        label: "{{ item.kind }}/{{ item.namespace }}/{{ item.name }}"
+      when: not item.suspended
+      changed_when: true
+
+- name: Verify accepted identities and observe multiple real controller cycles
+  ansible.builtin.include_tasks: validate.yaml
+
+- name: Remove only verified owned remote plaintext checkpoint staging
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, /var/backups/homelab-upgrade/k3s-checkpoint.py, cleanup, "{{ k3s_run_id }}"]
+  changed_when: true
+
+- name: Record successful per-hop acceptance while preserving Ubuntu milestone history
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, /var/backups/homelab-upgrade/k3s-checkpoint.py, status, k3s-accepted, "{{ k3s_target_version }}"]
+  changed_when: true
+
+- name: Remove only disarmed temporary safeguard units and helper after acceptance
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/k3s-checkpoint-guard.timer
+    - /etc/systemd/system/k3s-checkpoint-guard.service
+    - /var/backups/homelab-upgrade/k3s-checkpoint-guard.py
+
+- name: Reload systemd after removing the owned temporary safeguard units
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  async: 20
+  poll: 1

@@ -1,0 +1,8 @@
+[Unit]
+Description=Temporary checkpoint-only k3s restart deadline
+
+[Timer]
+OnActiveSec=240s
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=k3s-checkpoint-guard.service

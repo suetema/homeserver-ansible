@@ -1,0 +1,14 @@
+"""Boot-time UUID guard for an Ansible-bootstrapped host; no filesystem writes."""
+import json
+import subprocess
+import sys
+
+expected = {{ k3s_required_mounts | to_json }}
+for target, uuid in expected.items():
+    result = subprocess.run(['findmnt', '--json', '--mountpoint', target,
+                             '-o', 'TARGET,UUID,OPTIONS'], capture_output=True)
+    if result.returncode:
+        sys.exit('Required mount missing; refusing k3s startup')
+    mounts = json.loads(result.stdout)['filesystems']
+    if len(mounts) != 1 or mounts[0]['uuid'] != uuid or 'rw' not in mounts[0]['options'].split(','):
+        sys.exit('Required writable UUID mount mismatched; refusing k3s startup')

@@ -29,22 +29,6 @@ services:
     ports:
       - 7878:7878
     restart: unless-stopped
-  plex:
-    image: lscr.io/linuxserver/plex:1.28.2
-    container_name: plex
-    # network_mode: host
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - VERSION=docker
-    volumes:
-      - /etc/dockerconfigs/plex:/config
-      - /mnt/volume1/movies:/movies
-      - /mnt/volume1/series:/series
-      - /dev/dri:/dev/dri
-    restart: unless-stopped
-    ports:
-      - 32400:32400
   nzbget:
     image: lscr.io/linuxserver/nzbget:21.1.20220908
     container_name: nzbget

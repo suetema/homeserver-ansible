@@ -1,0 +1,96 @@
+---
+- name: Require reviewed platform and pinned supported target
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == homelab_expected_hostname
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version == '24.04'
+      - k3s_data_dir == '/var/lib/rancher/k3s'
+      - k3s_target_version in k3s_release_checksums
+      - k3s_target_version is match('^v1\.(33|34|35)\.[0-9]+\+k3s[0-9]+$')
+      - k3s_target_sha256 is match('^[a-f0-9]{64}$')
+      - k3s_target_sha256 == k3s_release_checksums[k3s_target_version]
+      - k3s_soak_seconds | int >= 1800
+      - k3s_checkpoint_max_age_seconds | int > 0
+      - k3s_checkpoint_max_age_seconds | int <= 600
+    fail_msg: Stop; unsupported target, unreviewed platform or invalid checksum/soak.
+
+- name: Read whitelisted live installation and workload metadata
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, '-']
+    stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/scripts/k3s_guard.py') }}"
+  register: k3s_guard_result
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Retain the whitelisted baseline without persisting secrets
+  ansible.builtin.set_fact:
+    k3s_baseline: "{{ k3s_guard_result.stdout | from_json }}"
+  no_log: true
+
+- name: Require real reviewed writable UUID mounts before any service operation
+  ansible.builtin.assert:
+    that:
+      - k3s_baseline.hostname == homelab_expected_hostname
+      - k3s_baseline.cgroup == 'cgroup2fs'
+      - k3s_baseline.root_free_bytes >= 17179869184
+      - k3s_baseline.mounts | length == k3s_required_mounts | length
+      - >-
+        k3s_baseline.mounts | selectattr('target', 'equalto', item.key)
+        | selectattr('uuid', 'equalto', item.value) | list | length == 1
+      - >-
+        'rw' in (k3s_baseline.mounts | selectattr('target', 'equalto', item.key)
+        | first).options.split(',')
+  loop: "{{ k3s_required_mounts | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Require explicit bootstrap on an empty host rather than partial restore
+  ansible.builtin.assert:
+    that:
+      - k3s_bootstrap | bool
+      - not k3s_baseline.partial_state
+    fail_msg: Partial/absent installation requires reviewed recovery, not automatic fresh state.
+  when: not k3s_baseline.installed
+
+- name: Validate existing state without rewriting service configuration
+  ansible.builtin.include_tasks: existing.yaml
+  when: k3s_baseline.installed and k3s_baseline.active
+
+- name: Allow only our unstarted empty bootstrap to reconverge without requiring a live cluster
+  ansible.builtin.assert:
+    that:
+      - k3s_bootstrap | bool
+      - k3s_baseline.bootstrap_managed
+      - not k3s_baseline.datastore_present
+      - k3s_baseline.service_reviewed
+      - not k3s_baseline.extra_config
+      - k3s_baseline.empty_private_env
+      - k3s_baseline.sha256 == k3s_target_sha256
+    fail_msg: Inactive existing state needs reviewed recovery; never reset its credentials or DB.
+  when: k3s_baseline.installed and not k3s_baseline.active
+
+- name: Explain the safe dry run
+  ansible.builtin.debug:
+    msg: >-
+      {{ k3s_baseline.version | default('not installed') }} -> {{ k3s_target_version }}.
+      Dry run/opt-in disabled: no artifact downloads, checkpoint, service changes,
+      Flux changes or host writes. Existing installation flags are retained.
+  when: ansible_check_mode or not k3s_apply | bool
+
+- name: Bootstrap an explicitly authorized empty host
+  ansible.builtin.include_tasks: bootstrap.yaml
+  when:
+    - not ansible_check_mode
+    - k3s_apply | bool
+    - not k3s_baseline.installed or not k3s_baseline.active
+
+- name: Upgrade exactly one explicitly authorized hop
+  ansible.builtin.include_tasks: upgrade.yaml
+  when:
+    - not ansible_check_mode
+    - k3s_apply | bool
+    - k3s_baseline.installed
+    - k3s_baseline.active
+    - k3s_baseline.version != k3s_target_version

@@ -1,0 +1,77 @@
+---
+- name: Require the known service and matching current binary
+  ansible.builtin.assert:
+    that:
+      - k3s_baseline.active
+      - k3s_baseline.service_reviewed
+      - >-
+        k3s_baseline.unit_sha256 in [k3s_reviewed_existing_unit_sha256,
+        lookup('ansible.builtin.template', 'k3s.service.j2') | hash('sha256')]
+      - not k3s_baseline.extra_config
+      - k3s_baseline.empty_private_env
+      - k3s_baseline.private_credentials_protected
+      - k3s_baseline.version in k3s_release_checksums
+      - k3s_baseline.sha256 == k3s_release_checksums[k3s_baseline.version]
+      - k3s_baseline.readyz == 'ok'
+      - k3s_baseline.nodes | length == 1
+      - k3s_baseline.nodes[0].ready
+      - k3s_baseline.running_pods == k3s_baseline.ready_pods
+      - k3s_baseline.pvcs | rejectattr('phase', 'equalto', 'Bound') | list | length == 0
+      - k3s_baseline.flux | rejectattr('ready') | list | length == 0
+    fail_msg: Stop; current service/config/checksum or cluster health differs from reviewed state.
+
+- name: Reject skipped minors or downgrades including same-minor patch downgrades
+  ansible.builtin.assert:
+    that:
+      - >-
+        (k3s_target_version.split('.')[1] | int) -
+        (k3s_baseline.version.split('.')[1] | int) in [0, 1]
+      - >-
+        (k3s_target_version.split('.')[1] | int) > (k3s_baseline.version.split('.')[1] | int)
+        or k3s_target_version[1:] is version(k3s_baseline.version[1:], '>=', version_type='loose')
+    fail_msg: One adjacent minor or forward patch only; recovery is not a binary-only downgrade.
+
+- name: Summarize concrete application isolation risks
+  ansible.builtin.debug:
+    msg:
+      unpinned_always_references: "{{ k3s_baseline.drift_risks | length }}"
+      unique_unpinned_always_images: "{{ k3s_baseline.drift_risks | map(attribute='image') | unique | list | length }}"
+      broad_chart_constraints: "{{ k3s_baseline.chart_risks | length }}"
+      current_version: "{{ k3s_baseline.version }}"
+      running_ready: "{{ k3s_baseline.ready_pods }}"
+      flux_ready: "{{ k3s_baseline.flux | selectattr('ready') | list | length }}"
+
+- name: Record a credential-free blocked phase without changing any service or workload
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, '-', status, k3s-blocked-image-chart-isolation, "{{ k3s_target_version }}"]
+    stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/scripts/k3s_checkpoint_remote.py') }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - k3s_apply | bool
+    - k3s_baseline.version != k3s_target_version
+    - k3s_baseline.drift_risks | length > 0 or k3s_baseline.chart_risks | length > 0
+
+- name: Require parent clearance of the critical code review before the first service pause
+  ansible.builtin.assert:
+    that: k3s_code_review_cleared | bool
+    fail_msg: Pins may proceed; parent must clear the checkpoint safeguard and cleanup review before service pause.
+  when:
+    - not ansible_check_mode
+    - k3s_apply | bool
+    - k3s_baseline.version != k3s_target_version
+
+- name: Require immutable pull and chart isolation before an actual change
+  ansible.builtin.assert:
+    that:
+      - k3s_baseline.drift_risks | length == 0
+      - k3s_baseline.chart_risks | length == 0
+      - k3s_baseline.flux_cli is not none
+    fail_msg: >-
+      BLOCKED before service pause. GitOps approval is needed to pin accepted
+      unpinned Always images/current broad charts (including sidecars/init containers).
+      Flux suspension/cache does not freeze mutable registry tags. No app specs patched.
+  when:
+    - not ansible_check_mode
+    - k3s_apply | bool
+    - k3s_baseline.version != k3s_target_version

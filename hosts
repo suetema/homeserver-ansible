@@ -1,2 +1,7 @@
-[default]
-10.0.0.219
+[homelab]
+ryback ansible_host=192.168.1.110 ansible_user=maarten ansible_python_interpreter=/usr/bin/python3
+
+[homelab:vars]
+homelab_expected_hostname=ryback
+homelab_media_uuid=8bf25db0-ca04-4c96-b91e-07d3458f4021
+homelab_root_uuid=badcfde0-9b10-4f96-8684-f2baba24b223

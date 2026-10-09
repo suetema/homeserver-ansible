@@ -1,0 +1,15 @@
+---
+# Explicit opt-in; the normal homeserver.yaml remains read-only.
+k3s_apply: false
+k3s_code_review_cleared: false
+k3s_bootstrap: false
+k3s_start_bootstrap: false
+k3s_target_version: "{{ k3s_desired_version }}"
+k3s_target_sha256: "{{ k3s_release_checksums[k3s_target_version] }}"
+k3s_checkpoint_max_age_seconds: 600
+k3s_soak_seconds: 1800
+k3s_data_dir: /var/lib/rancher/k3s
+k3s_backup_root: "{{ lookup('ansible.builtin.env', 'HOME') }}/homelab-backups/ryback"
+k3s_age: "{{ lookup('ansible.builtin.env', 'HOME') }}/homelab-backups/tools/age-v1.3.2/age"
+k3s_age_identity: "{{ lookup('ansible.builtin.env', 'HOME') }}/.config/homelab-backup/ryback.agekey"
+k3s_age_recipient: "{{ lookup('ansible.builtin.env', 'HOME') }}/homelab-backups/tools/ryback.recipient"

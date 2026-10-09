@@ -1,0 +1,111 @@
+---
+- name: Require reviewed host and disk identities
+  ansible.builtin.assert:
+    that:
+      - homelab_expected_hostname is defined
+      - homelab_media_uuid is defined
+      - homelab_root_uuid is defined
+      - inventory_hostname == homelab_expected_hostname
+      - ansible_facts['distribution'] == 'Ubuntu'
+      - ansible_facts['distribution_version'] in preflight_supported_ubuntu_releases
+      - ansible_facts['python']['version']['major'] == 3
+      - ansible_facts['python']['version']['minor'] >= 8
+    fail_msg: Stop and review the inventory, OS support or Python version.
+
+- name: Read the remote hostname
+  ansible.builtin.command:
+    argv: [hostname]
+  register: preflight_hostname
+  changed_when: false
+  check_mode: false
+
+- name: Require the intended server
+  ansible.builtin.assert:
+    that: preflight_hostname.stdout | trim == homelab_expected_hostname
+
+- name: Inspect the exact media mount without traversing its contents
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --json
+      - --mountpoint
+      - "{{ preflight_media_path }}"
+      - --output
+      - TARGET,UUID,FSTYPE
+  register: preflight_media_mount
+  changed_when: false
+  check_mode: false
+
+- name: Require the real media filesystem rather than an empty root directory
+  ansible.builtin.assert:
+    that:
+      - (preflight_media_mount.stdout | from_json).filesystems | length == 1
+      - (preflight_media_mount.stdout | from_json).filesystems[0].target == preflight_media_path
+      - (preflight_media_mount.stdout | from_json).filesystems[0].uuid == homelab_media_uuid
+      - (preflight_media_mount.stdout | from_json).filesystems[0].fstype == 'ext4'
+    fail_msg: Stop; the expected media disk is not correctly mounted.
+
+- name: Inspect the root filesystem
+  ansible.builtin.command:
+    argv: [findmnt, --json, --mountpoint, /, --output, "TARGET,UUID"]
+  register: preflight_root_mount
+  changed_when: false
+  check_mode: false
+
+- name: Require the original boot disk
+  ansible.builtin.assert:
+    that:
+      - (preflight_root_mount.stdout | from_json).filesystems[0].uuid == homelab_root_uuid
+
+- name: Inspect available root filesystem capacity
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - "import shutil; print(shutil.disk_usage('/').free)"
+  register: preflight_root_free
+  changed_when: false
+  check_mode: false
+
+- name: Require headroom for maintenance and staging
+  ansible.builtin.assert:
+    that: preflight_root_free.stdout | int >= preflight_minimum_root_free_bytes
+
+- name: Inspect the k3s recovery token metadata without reading its contents
+  ansible.builtin.stat:
+    path: /var/lib/rancher/k3s/server/token
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+    follow: false
+  register: preflight_k3s_token
+
+- name: Require the k3s token to remain present
+  ansible.builtin.assert:
+    that:
+      - preflight_k3s_token.stat.exists
+      - preflight_k3s_token.stat.isreg
+
+- name: Inspect Kubernetes node readiness
+  ansible.builtin.command:
+    argv: [k3s, kubectl, get, nodes, -o, json]
+  register: preflight_k3s_nodes
+  changed_when: false
+  check_mode: false
+
+- name: Require the expected single-node cluster to be Ready
+  ansible.builtin.assert:
+    that:
+      - (preflight_k3s_nodes.stdout | from_json)['items'] | length == 1
+      - (preflight_k3s_nodes.stdout | from_json)['items'][0].metadata.name == homelab_expected_hostname
+      - >-
+        (preflight_k3s_nodes.stdout | from_json)['items'][0].status.conditions
+        | selectattr('type', 'equalto', 'Ready')
+        | selectattr('status', 'equalto', 'True') | list | length == 1
+
+- name: Summarize the read-only preflight
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: Ubuntu {{ ansible_facts['distribution_version'] }},
+      kernel {{ ansible_facts['kernel'] }}; intended disks mounted and k3s Ready.
+      No packages, services, networking, boot settings or deployments changed.

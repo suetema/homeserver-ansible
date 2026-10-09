@@ -1,0 +1,14 @@
+---
+- name: Converge explicitly authorized pinned k3s host state
+  hosts: homelab
+  become: true
+  gather_facts: true
+  gather_subset:
+    - "!all"
+    - "!min"
+    - distribution
+    - python
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: k3s

@@ -1,0 +1,5 @@
+# Transitional controller: 2.19 supports ryback's current Python 3.8.
+# Revisit before November 2026 EOL; newer core requires target Python >= 3.9.
+ansible-core==2.19.14
+ansible-lint==26.9.0
+PyYAML==6.0.3

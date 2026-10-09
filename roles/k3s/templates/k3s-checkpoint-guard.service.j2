@@ -1,0 +1,9 @@
+[Unit]
+Description=Temporary unchanged-binary k3s checkpoint restart safeguard
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /var/backups/homelab-upgrade/k3s-checkpoint-guard.py fire
+TimeoutStartSec=20s

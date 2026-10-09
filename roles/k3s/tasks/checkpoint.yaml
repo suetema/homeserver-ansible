@@ -1,0 +1,186 @@
+---
+- name: Generate an owned per-hop checkpoint ID
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -c
+      - "import datetime,secrets; print('k3s-'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+secrets.token_hex(4))"
+  delegate_to: localhost
+  become: false
+  register: k3s_run_id_result
+  changed_when: false
+
+- name: Retain the owned checkpoint ID
+  ansible.builtin.set_fact:
+    k3s_run_id: "{{ k3s_run_id_result.stdout }}"
+
+- name: Check local encryption prerequisites without reading the identity
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+  loop: ["{{ k3s_age }}", "{{ k3s_age_identity }}", "{{ k3s_age_recipient }}"]
+  delegate_to: localhost
+  become: false
+  register: k3s_encryption_files
+  no_log: true
+
+- name: Require the existing Mac encryption tools and private key
+  ansible.builtin.assert:
+    that:
+      - k3s_encryption_files.results | rejectattr('stat.exists') | list | length == 0
+      - k3s_encryption_files.results[1].stat.mode == '0600'
+  no_log: true
+
+- name: Check Mac capacity before the control-plane pause or private archive fetch
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -c
+      - "import shutil,sys; assert shutil.disk_usage(sys.argv[1]).free >= 5*1024**3"
+      - "{{ k3s_backup_root }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Create the private off-host checkpoint directory
+  ansible.builtin.file:
+    path: "{{ k3s_backup_root }}/{{ k3s_run_id }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Arm independent unchanged-binary recovery before stopping the control plane
+  ansible.builtin.include_tasks: guard-arm.yaml
+
+- name: Capture a stopped whole SQLite recovery unit and always resume current k3s
+  block:
+    - name: Stop only the control-plane service for a consistent copy
+      ansible.builtin.systemd_service:
+        name: k3s
+        state: stopped
+        no_block: true
+      async: 20
+      poll: 1
+
+    - name: Require the stopped original server and zero MainPID within the pause deadline
+      ansible.builtin.command:
+        argv: [systemctl, show, k3s, '-p', ActiveState, '-p', MainPID]
+      register: k3s_checkpoint_stopped
+      changed_when: false
+      async: 10
+      poll: 1
+      until: "k3s_checkpoint_stopped.rc == 0 and 'ActiveState=inactive' in k3s_checkpoint_stopped.stdout and 'MainPID=0' in k3s_checkpoint_stopped.stdout"
+      retries: 10
+      delay: 2
+
+    - name: Copy the whole closed DB directory with matching bootstrap material
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /var/backups/homelab-upgrade/k3s-checkpoint.py, capture, "{{ k3s_run_id }}"]
+        stdin: "{{ k3s_baseline | to_json }}"
+      register: k3s_captured_checkpoint
+      changed_when: true
+      no_log: true
+      async: 90
+      poll: 2
+  always:
+    - name: Resume the unchanged current binary even if the checkpoint fails
+      ansible.builtin.systemd_service:
+        name: k3s
+        state: started
+        no_block: true
+      async: 20
+      poll: 1
+
+    - name: Bound original API recovery before off-host transfer or safeguard cancellation
+      ansible.builtin.command:
+        argv: [/usr/local/bin/k3s, kubectl, --request-timeout=10s, get, --raw=/readyz]
+      changed_when: false
+      register: k3s_checkpoint_resumed
+      async: 15
+      poll: 1
+      until: k3s_checkpoint_resumed.rc == 0 and k3s_checkpoint_resumed.stdout | trim == 'ok'
+      retries: 30
+      delay: 5
+
+    - name: Prove the original binary identity remains unchanged before canceling safeguard
+      ansible.builtin.include_tasks: service-ready.yaml
+      vars:
+        k3s_expected_running_version: "{{ k3s_baseline.version }}"
+
+    - name: Check the original executable before canceling the recovery timer
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+        checksum_algorithm: sha256
+      register: k3s_original_resumed_binary
+
+    - name: Require the unchanged original executable before off-host verification
+      ansible.builtin.assert:
+        that: k3s_original_resumed_binary.stat.checksum == k3s_baseline.sha256
+
+    - name: Cancel the checkpoint-only safeguard before any possible binary promotion
+      ansible.builtin.include_tasks: guard-disarm.yaml
+
+- name: Require current API health before off-host transfer
+  ansible.builtin.command:
+    argv: [/usr/local/bin/k3s, kubectl, --request-timeout=10s, get, --raw=/readyz]
+  changed_when: false
+  register: k3s_checkpoint_readyz
+  async: 15
+  poll: 1
+  until: k3s_checkpoint_readyz.rc == 0 and k3s_checkpoint_readyz.stdout | trim == 'ok'
+  retries: 30
+  delay: 10
+
+- name: Fetch the protected tar into the private Mac directory
+  ansible.builtin.fetch:
+    src: "/var/backups/homelab-upgrade/{{ k3s_run_id }}/checkpoint.tar"
+    dest: "{{ k3s_backup_root }}/{{ k3s_run_id }}/checkpoint.tar"
+    flat: true
+  no_log: true
+
+- name: Encrypt and fully authenticate the checkpoint with native restored SQLite integrity
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ playbook_dir }}/scripts/k3s_checkpoint_verify.py"
+      - "{{ k3s_backup_root }}/{{ k3s_run_id }}/checkpoint.tar"
+      - "{{ k3s_age }}"
+      - "{{ k3s_age_identity }}"
+      - "{{ k3s_age_recipient }}"
+  delegate_to: localhost
+  become: false
+  register: k3s_verified_checkpoint
+  changed_when: true
+  no_log: true
+
+- name: Retain the authenticated credential-free recovery receipt
+  ansible.builtin.set_fact:
+    k3s_checkpoint_receipt: "{{ k3s_verified_checkpoint.stdout | from_json }}"
+
+- name: Save verification receipt beside the owned remote checkpoint
+  ansible.builtin.copy:
+    content: "{{ k3s_checkpoint_receipt | to_nice_json }}\n"
+    dest: "/var/backups/homelab-upgrade/{{ k3s_run_id }}/verified.json"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Read current time for fresh verified-offhost checkpoint gate
+  ansible.builtin.command:
+    argv: [/usr/bin/date, +%s]
+  register: k3s_gate_epoch
+  changed_when: false
+
+- name: Require newly verified matching recovery pairing before replacing the binary
+  ansible.builtin.assert:
+    that:
+      - k3s_checkpoint_receipt.run_id == k3s_run_id
+      - k3s_checkpoint_receipt.status == 'verified'
+      - k3s_checkpoint_receipt.version == k3s_baseline.version
+      - k3s_checkpoint_receipt.sha256 == k3s_baseline.sha256
+      - k3s_checkpoint_receipt.age_authenticated_to_eof
+      - k3s_checkpoint_receipt.sqlite_integrity == 'ok'
+      - k3s_gate_epoch.stdout | int - k3s_checkpoint_receipt.captured_epoch | float >= 0
+      - k3s_gate_epoch.stdout | int - k3s_checkpoint_receipt.captured_epoch | float < k3s_checkpoint_max_age_seconds | int
+    fail_msg: Fresh verified off-host checkpoint gate failed; old binary remains installed.

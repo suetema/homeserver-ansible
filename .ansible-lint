@@ -1,0 +1,9 @@
+---
+# Historical roles are retained as evidence, not part of the safe entry point.
+exclude_paths:
+  - .venv/
+  - roles/common/
+  - roles/docker/
+  - roles/compose/
+  - roles/nfs-client/
+  - group_vars/

@@ -1,0 +1,46 @@
+---
+- name: Create private controller artifact cache
+  ansible.builtin.file:
+    path: "{{ k3s_backup_root }}/artifacts"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Download only the official exact-tag amd64 binary with the pinned checksum
+  ansible.builtin.get_url:
+    url: "https://github.com/k3s-io/k3s/releases/download/{{ k3s_target_version | urlencode }}/k3s"
+    dest: "{{ k3s_backup_root }}/artifacts/k3s-{{ k3s_target_version }}"
+    checksum: "sha256:{{ k3s_target_sha256 }}"
+    mode: "0600"
+    timeout: 120
+  delegate_to: localhost
+  become: false
+
+- name: Stage the verified binary without touching the running executable
+  ansible.builtin.copy:
+    src: "{{ k3s_backup_root }}/artifacts/k3s-{{ k3s_target_version }}"
+    dest: /usr/local/bin/k3s.ansible-staged
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Recheck the transferred artifact SHA256
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s.ansible-staged
+    checksum_algorithm: sha256
+  register: k3s_staged_binary
+
+- name: Require matching pinned artifact on the host
+  ansible.builtin.assert:
+    that: k3s_staged_binary.stat.checksum == k3s_target_sha256
+
+- name: Verify the staged executable reports the intended exact version
+  ansible.builtin.command:
+    argv: [/usr/local/bin/k3s.ansible-staged, --version]
+  register: k3s_staged_version
+  changed_when: false
+
+- name: Require exact artifact version before checkpoint or installation
+  ansible.builtin.assert:
+    that: k3s_staged_version.stdout.split()[2] == k3s_target_version

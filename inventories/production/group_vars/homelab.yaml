@@ -1,0 +1,24 @@
+---
+# Verified read-only on 2026-10-08. UUIDs identify the disks, not device letters.
+homelab_expected_hostname: ryback
+homelab_media_uuid: 8bf25db0-ca04-4c96-b91e-07d3458f4021
+homelab_root_uuid: badcfde0-9b10-4f96-8684-f2baba24b223
+
+# Desired supported holding point. Explicit one-hop target overrides are required
+# while traversing from 1.33; never skip a minor to match desired state.
+k3s_desired_version: v1.35.9+k3s1
+# Existing installer-generated unit is preserved byte-for-byte on upgrades.
+k3s_reviewed_existing_unit_sha256: 40636c7e3db8010795a0f5eb266725874adb2f022e9ace54d03c697ff82c1bc6
+k3s_required_mounts:
+  /: "{{ homelab_root_uuid }}"
+  /mnt/volume1: "{{ homelab_media_uuid }}"
+  /boot: 00a45d23-2bd1-4021-b6d7-6351737909c3
+  /boot/efi: 93D9-59DB
+  /root: 12069619-4c4a-4c2f-a67f-cf5271d09907
+  /home: 2f2fea73-c465-41ac-b37b-3c22205a4f5e
+# Official amd64 sha256sum-amd64.txt + GitHub asset digest, retrieved 2026-10-09.
+# https://github.com/k3s-io/k3s/releases/download/<encoded-version>/sha256sum-amd64.txt
+k3s_release_checksums:
+  v1.33.11+k3s1: 4b9201557bdca116d5d26ed70a38698e2667ac15655efe73f802119af80285fd
+  v1.34.12+k3s1: ef1df26b26276c0f6d962391c94e12f9362d1f1e30ec7a7926e9ddb84b0d66ce
+  v1.35.9+k3s1: 897acb21cca57d477a211102251a6591450ce767344a9faaa121a1007ca9fa9a

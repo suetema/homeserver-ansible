@@ -1,0 +1,9 @@
+---
+- name: Restart pinned k3s once after an accepted binary replacement
+  ansible.builtin.systemd_service:
+    name: k3s
+    state: restarted
+    no_block: true
+  async: 20
+  poll: 1
+  when: not ansible_check_mode

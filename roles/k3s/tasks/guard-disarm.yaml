@@ -1,0 +1,35 @@
+---
+- name: Atomically disarm only this owned unchanged-binary restart safeguard
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, /var/backups/homelab-upgrade/k3s-checkpoint-guard.py, disarm, "{{ k3s_run_id }}"]
+  changed_when: true
+  async: 20
+  poll: 1
+
+- name: Stop the disarmed checkpoint timer without waiting indefinitely on systemd
+  ansible.builtin.systemd_service:
+    name: k3s-checkpoint-guard.timer
+    state: stopped
+    enabled: false
+    no_block: true
+  async: 20
+  poll: 1
+
+- name: Prove safeguard timer and any in-flight safeguard process are inactive before promotion
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - >-
+        import json,subprocess;
+        m=json.load(open('/var/backups/homelab-upgrade/k3s-checkpoint-guard.json'));
+        t=subprocess.run(['systemctl','show','k3s-checkpoint-guard.timer','-p','ActiveState','--value'],capture_output=True,timeout=5,check=True).stdout.decode().strip();
+        s=subprocess.run(['systemctl','show','k3s-checkpoint-guard.service','-p','MainPID','--value'],capture_output=True,timeout=5,check=True).stdout.decode().strip();
+        assert not m['armed'] and t=='inactive' and s=='0'; print('safeguard_disarmed_no_pending_process')
+  changed_when: false
+  register: k3s_guard_disarmed
+  async: 15
+  poll: 1
+  until: k3s_guard_disarmed.rc == 0
+  retries: 10
+  delay: 1

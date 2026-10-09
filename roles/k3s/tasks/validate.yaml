@@ -1,0 +1,50 @@
+---
+- name: Poll exact version and full acceptance until the bounded recovery deadline
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /var/backups/homelab-upgrade/k3s_validate_remote.py
+      - validate
+      - /var/backups/homelab-upgrade/k3s-baseline.json
+      - "{{ k3s_target_version }}"
+      - "0"
+  register: k3s_acceptance_poll
+  changed_when: false
+  until: k3s_acceptance_poll.rc == 0
+  retries: 30
+  delay: 10
+
+- name: Run bounded real Plex hardware decode and encode acceptance with owned-session cleanup
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ playbook_dir }}/scripts/test_or_probe_plex_gpu_transcode.py"
+      - transcode
+      - --output
+      - "{{ k3s_backup_root }}/{{ k3s_run_id }}/plex-transcode.json"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: k3s_plex_transcode
+  no_log: true
+
+- name: Require native full VAAPI pipeline acceptance
+  ansible.builtin.assert:
+    that:
+      - (k3s_plex_transcode.stdout | from_json).hardware is true
+      - (k3s_plex_transcode.stdout | from_json).passed is true
+      - (k3s_plex_transcode.stdout | from_json).own_stream_stopped is true
+  no_log: true
+
+- name: Observe at least thirty actual minutes and multiple controller cycles
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - /var/backups/homelab-upgrade/k3s_validate_remote.py
+      - validate
+      - /var/backups/homelab-upgrade/k3s-baseline.json
+      - "{{ k3s_target_version }}"
+      - "{{ k3s_soak_seconds | string }}"
+  changed_when: false
+  async: 3600
+  poll: 60
